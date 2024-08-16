@@ -27,9 +27,12 @@ async function connectToMongoDB() {
 }
 
 
+const corsOptions = {
+	origin: 'https://delmmv.github.io',
+	optionsSuccessStatus: 200
+};
 
-app.use(cors());
-
+app.use(cors(corsOptions));
 
 
 app.get('/api/route/:userId', async (req, res) => {
