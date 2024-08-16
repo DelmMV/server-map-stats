@@ -33,6 +33,8 @@ const corsOptions = {
 	optionsSuccessStatus: 200 // Некоторые старые браузеры могут не поддерживать статус 204 для успешных запросов
 };
 
+app.use(cors(corsOptions));
+
 
 
 app.get('/api/route/:userId', async (req, res) => {
