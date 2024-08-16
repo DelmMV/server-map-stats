@@ -1,10 +1,10 @@
 {
   "name": "server-map-stats",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "server-map.js",
   "scripts": {
-    "start": "node ./index.js",
-    "dev": "nodemon ./index.js"
+    "start": "node server-map.js",
+    "dev": "nodemon server-map.js"
   },
   "author": "",
   "license": "ISC",
