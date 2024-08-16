@@ -26,7 +26,15 @@ async function connectToMongoDB() {
 	}
 }
 
-app.use(cors());
+const corsOptions = {
+	origin: 'http://188.243.88.61', // Разрешить запросы с этого домена
+	methods: 'GET,HEAD,PUT,PATCH,POST,DELETE', // Разрешить все эти методы
+	credentials: true, // Если вам нужно передавать куки или авторизационные данные
+	optionsSuccessStatus: 200 // Некоторые старые браузеры могут не поддерживать статус 204 для успешных запросов
+};
+
+app.use(cors(corsOptions));
+
 
 app.get('/api/route/:userId', async (req, res) => {
 	const { userId } = req.params;
