@@ -1,6 +1,6 @@
 const express = require('express');
 const { MongoClient } = require('mongodb');
-const cors = require('cors');
+//const cors = require('cors');
 const haversine = require('haversine-distance');
 
 const app = express();
@@ -27,12 +27,12 @@ async function connectToMongoDB() {
 }
 
 
-const corsOptions = {
-	origin: 'https://delmmv.github.io/web-map-stats/',
-	optionsSuccessStatus: 200
-};
-
-app.use(cors(corsOptions));
+// const corsOptions = {
+// 	origin: 'https://delmmv.github.io/web-map-stats/',
+// 	optionsSuccessStatus: 200
+// };
+//
+// app.use(cors(corsOptions));
 
 
 app.get('/api/route/:userId', async (req, res) => {
