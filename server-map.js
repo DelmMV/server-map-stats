@@ -28,7 +28,7 @@ async function connectToMongoDB() {
 
 
 const corsOptions = {
-	origin: 'https://delmmv.github.io',
+	origin: 'https://delmmv.github.io/web-map-stats/',
 	optionsSuccessStatus: 200
 };
 
