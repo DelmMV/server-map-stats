@@ -1,7 +1,7 @@
 const express = require('express');
 const { MongoClient } = require('mongodb');
-//const cors = require('cors');
 const haversine = require('haversine-distance');
+const cors = require('cors')
 
 const app = express();
 const port = 5001;
@@ -32,7 +32,7 @@ async function connectToMongoDB() {
 // 	optionsSuccessStatus: 200
 // };
 //
-// app.use(cors(corsOptions));
+app.use(cors());
 
 
 app.get('/api/route/:userId', async (req, res) => {
