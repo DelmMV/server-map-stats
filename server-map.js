@@ -26,12 +26,6 @@ async function connectToMongoDB() {
 	}
 }
 
-
-// const corsOptions = {
-// 	origin: 'https://delmmv.github.io/web-map-stats/',
-// 	optionsSuccessStatus: 200
-// };
-//
 app.use(cors());
 
 
@@ -138,26 +132,64 @@ const getTopUsers = async (period, limit) => {
 	const now = new Date();
 	let startTimestamp, endTimestamp;
 	
-	if (period === 'week') {
-		const dayOfWeek = now.getDay();
-		const monday = new Date(now);
-		monday.setHours(0, 0, 0, 0);
-		monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-		const sunday = new Date(monday);
-		sunday.setDate(monday.getDate() + 6);
-		sunday.setHours(23, 59, 59, 999);
+	switch (period) {
+		case 'this_week':
+		{
+			const dayOfWeek = now.getDay();
+			const monday = new Date(now);
+			monday.setHours(0, 0, 0, 0);
+			monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // Понедельник текущей недели
+			const sunday = new Date(monday);
+			sunday.setDate(monday.getDate() + 6);
+			sunday.setHours(23, 59, 59, 999); // Воскресенье текущей недели
+			
+			startTimestamp = Math.floor(monday.getTime() / 1000);
+			endTimestamp = Math.floor(sunday.getTime() / 1000);
+		}
+			break;
 		
-		startTimestamp = Math.floor(monday.getTime() / 1000);
-		endTimestamp = Math.floor(sunday.getTime() / 1000);
-	} else if (period === 'month') {
-		const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-		const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-		lastDayOfMonth.setHours(23, 59, 59, 999);
+		case 'last_week':
+		{
+			const lastWeek = new Date(now);
+			lastWeek.setDate(lastWeek.getDate() - 7); // Сдвиг на неделю назад
+			
+			const dayOfWeek = lastWeek.getDay();
+			const lastMonday = new Date(lastWeek);
+			lastMonday.setHours(0, 0, 0, 0);
+			lastMonday.setDate(lastWeek.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // Понедельник прошлой недели
+			const lastSunday = new Date(lastMonday);
+			lastSunday.setDate(lastMonday.getDate() + 6);
+			lastSunday.setHours(23, 59, 59, 999); // Воскресенье прошлой недели
+			
+			startTimestamp = Math.floor(lastMonday.getTime() / 1000);
+			endTimestamp = Math.floor(lastSunday.getTime() / 1000);
+		}
+			break;
 		
-		startTimestamp = Math.floor(firstDayOfMonth.getTime() / 1000);
-		endTimestamp = Math.floor(lastDayOfMonth.getTime() / 1000);
-	} else {
-		throw new Error('Invalid period');
+		case 'this_month':
+		{
+			const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+			const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+			lastDayOfMonth.setHours(23, 59, 59, 999); // Последний день текущего месяца
+			
+			startTimestamp = Math.floor(firstDayOfMonth.getTime() / 1000);
+			endTimestamp = Math.floor(lastDayOfMonth.getTime() / 1000);
+		}
+			break;
+		
+		case 'last_month':
+		{
+			const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+			const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+			lastDayOfLastMonth.setHours(23, 59, 59, 999); // Последний день прошлого месяца
+			
+			startTimestamp = Math.floor(firstDayOfLastMonth.getTime() / 1000);
+			endTimestamp = Math.floor(lastDayOfLastMonth.getTime() / 1000);
+		}
+			break;
+		
+		default:
+			throw new Error('Invalid period');
 	}
 	
 	const uniqueUsers = await collection.aggregate([
@@ -178,6 +210,7 @@ const getTopUsers = async (period, limit) => {
 	userDistances.sort((a, b) => b.distance - a.distance);
 	return userDistances.slice(0, limit);
 };
+
 
 const calculateWeeklyStats = async (userId) => {
 	const now = new Date();
@@ -210,9 +243,19 @@ const calculateWeeklyStats = async (userId) => {
 };
 
 // Новый эндпоинт для получения топ-10 пользователей за неделю
-app.get('/api/top-users/week', async (req, res) => {
+app.get('/api/top-users/this-week', async (req, res) => {
 	try {
-		const topUsers = await getTopUsers('week', 10);
+		const topUsers = await getTopUsers('this_week', 100);
+		res.json(topUsers);
+	} catch (error) {
+		console.error('Error fetching top users for the week:', error);
+		res.status(500).json({ error: 'Internal server error' });
+	}
+});
+
+app.get('/api/top-users/last-week', async (req, res) => {
+	try {
+		const topUsers = await getTopUsers('last_week', 100);
 		res.json(topUsers);
 	} catch (error) {
 		console.error('Error fetching top users for the week:', error);
@@ -221,9 +264,19 @@ app.get('/api/top-users/week', async (req, res) => {
 });
 
 // Новый эндпоинт для получения топ-10 пользователей за месяц
-app.get('/api/top-users/month', async (req, res) => {
+app.get('/api/top-users/this-month', async (req, res) => {
 	try {
-		const topUsers = await getTopUsers('month', 10);
+		const topUsers = await getTopUsers('this_month', 100);
+		res.json(topUsers);
+	} catch (error) {
+		console.error('Error fetching top users for the month:', error);
+		res.status(500).json({ error: 'Internal server error' });
+	}
+});
+
+app.get('/api/top-users/last-month', async (req, res) => {
+	try {
+		const topUsers = await getTopUsers('last_month', 100);
 		res.json(topUsers);
 	} catch (error) {
 		console.error('Error fetching top users for the month:', error);
