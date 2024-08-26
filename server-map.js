@@ -73,7 +73,6 @@ app.get('/api/route/:userId', async (req, res) => {
 	}
 });
 
-// Функция для расчета статистики
 const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 	const collection = db.collection('locations');
 	
@@ -126,7 +125,6 @@ const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 	return { distance: totalDistance / 1000, speed: avgSpeed, dailyStats };
 };
 
-// Функция для получения топ пользователей
 const getTopUsers = async (period, limit) => {
 	const collection = db.collection('locations');
 	const now = new Date();
@@ -242,10 +240,9 @@ const calculateWeeklyStats = async (userId) => {
 	return detailedStats;
 };
 
-// Новый эндпоинт для получения топ-10 пользователей за неделю
-app.get('/api/top-users/this-week', async (req, res) => {
+app.get('/api/top-users/this_week', async (req, res) => {
 	try {
-		const topUsers = await getTopUsers('this_week', 100);
+		const topUsers = await getTopUsers('this_week', 50);
 		res.json(topUsers);
 	} catch (error) {
 		console.error('Error fetching top users for the week:', error);
@@ -253,9 +250,9 @@ app.get('/api/top-users/this-week', async (req, res) => {
 	}
 });
 
-app.get('/api/top-users/last-week', async (req, res) => {
+app.get('/api/top-users/last_week', async (req, res) => {
 	try {
-		const topUsers = await getTopUsers('last_week', 100);
+		const topUsers = await getTopUsers('last_week', 50);
 		res.json(topUsers);
 	} catch (error) {
 		console.error('Error fetching top users for the week:', error);
@@ -263,10 +260,9 @@ app.get('/api/top-users/last-week', async (req, res) => {
 	}
 });
 
-// Новый эндпоинт для получения топ-10 пользователей за месяц
-app.get('/api/top-users/this-month', async (req, res) => {
+app.get('/api/top-users/this_month', async (req, res) => {
 	try {
-		const topUsers = await getTopUsers('this_month', 100);
+		const topUsers = await getTopUsers('this_month', 50);
 		res.json(topUsers);
 	} catch (error) {
 		console.error('Error fetching top users for the month:', error);
@@ -274,7 +270,7 @@ app.get('/api/top-users/this-month', async (req, res) => {
 	}
 });
 
-app.get('/api/top-users/last-month', async (req, res) => {
+app.get('/api/top-users/last_month', async (req, res) => {
 	try {
 		const topUsers = await getTopUsers('last_month', 100);
 		res.json(topUsers);
@@ -295,6 +291,417 @@ app.get('/api/user-stats/week/:userId', async (req, res) => {
 		res.json(stats);
 	} catch (error) {
 		console.error('Error fetching weekly stats for user:', error);
+		res.status(500).json({ error: 'Internal server error' });
+	}
+});
+
+const calculateTotalDistance = async (period) => {
+	const collection = db.collection('locations');
+	const now = new Date();
+	let startTimestamp, endTimestamp;
+	
+	switch (period) {
+		case 'this_week':
+		{
+			const dayOfWeek = now.getDay();
+			const monday = new Date(now);
+			monday.setHours(0, 0, 0, 0);
+			monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+			const sunday = new Date(monday);
+			sunday.setDate(monday.getDate() + 6);
+			sunday.setHours(23, 59, 59, 999);
+			
+			startTimestamp = Math.floor(monday.getTime() / 1000);
+			endTimestamp = Math.floor(sunday.getTime() / 1000);
+		}
+			break;
+		
+		case 'last_week':
+		{
+			const lastWeek = new Date(now);
+			lastWeek.setDate(lastWeek.getDate() - 7);
+			
+			const dayOfWeek = lastWeek.getDay();
+			const lastMonday = new Date(lastWeek);
+			lastMonday.setHours(0, 0, 0, 0);
+			lastMonday.setDate(lastWeek.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+			const lastSunday = new Date(lastMonday);
+			lastSunday.setDate(lastMonday.getDate() + 6);
+			lastSunday.setHours(23, 59, 59, 999);
+			
+			startTimestamp = Math.floor(lastMonday.getTime() / 1000);
+			endTimestamp = Math.floor(lastSunday.getTime() / 1000);
+		}
+			break;
+		
+		case 'this_month':
+		{
+			const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+			const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+			lastDayOfMonth.setHours(23, 59, 59, 999);
+			
+			startTimestamp = Math.floor(firstDayOfMonth.getTime() / 1000);
+			endTimestamp = Math.floor(lastDayOfMonth.getTime() / 1000);
+		}
+			break;
+		
+		case 'last_month':
+		{
+			const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+			const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+			lastDayOfLastMonth.setHours(23, 59, 59, 999);
+			
+			startTimestamp = Math.floor(firstDayOfLastMonth.getTime() / 1000);
+			endTimestamp = Math.floor(lastDayOfLastMonth.getTime() / 1000);
+		}
+			break;
+		
+		default:
+			throw new Error('Invalid period');
+	}
+	
+	const result = await collection.aggregate([
+		{
+			$match: {
+				timestamp: { $gte: startTimestamp, $lte: endTimestamp }
+			}
+		},
+		{
+			$group: {
+				_id: { userId: "$userId", sessionId: "$sessionId" },
+				coordinates: {
+					$push: {
+						latitude: "$latitude",
+						longitude: "$longitude",
+						timestamp: "$timestamp"
+					}
+				}
+			}
+		}
+	]).toArray();
+	
+	let totalDistance = 0;
+	
+	for (const session of result) {
+		let sessionDistance = 0;
+		const coordinates = session.coordinates;
+		
+		for (let i = 1; i < coordinates.length; i++) {
+			const prev = coordinates[i - 1];
+			const curr = coordinates[i];
+			
+			// Проверяем, что точки принадлежат одной сессии (разница во времени менее часа)
+			if (curr.timestamp - prev.timestamp < 3600) {
+				const distance = haversine(
+						{ lat: prev.latitude, lon: prev.longitude },
+						{ lat: curr.latitude, lon: curr.longitude }
+				);
+				sessionDistance += distance;
+			}
+		}
+		
+		totalDistance += sessionDistance;
+	}
+	
+	return totalDistance / 1000; // Конвертируем в километры
+};
+
+app.get('/api/total-distance/:period', async (req, res) => {
+	const { period } = req.params;
+	
+	if (!['this_week', 'last_week', 'this_month', 'last_month'].includes(period)) {
+		return res.status(400).json({ error: 'Invalid period' });
+	}
+	
+	try {
+		const totalDistance = await calculateTotalDistance(period);
+		res.json({ period, totalDistance });
+	} catch (error) {
+		console.error(`Error calculating total distance for ${period}:`, error);
+		res.status(500).json({ error: 'Internal server error' });
+	}
+});
+
+const getTopLongestSessions = async (period, limit) => {
+	const { startTimestamp, endTimestamp } = getPeriodTimestamps(period);
+	const collection = db.collection('locations');
+	
+	const result = await collection.aggregate([
+		{
+			$match: {
+				timestamp: { $gte: startTimestamp, $lte: endTimestamp }
+			}
+		},
+		{
+			$group: {
+				_id: { userId: "$userId", sessionId: "$sessionId" },
+				username: { $first: "$username" },
+				coordinates: {
+					$push: {
+						latitude: "$latitude",
+						longitude: "$longitude",
+						timestamp: "$timestamp"
+					}
+				},
+				firstTimestamp: { $min: "$timestamp" },
+				lastTimestamp: { $max: "$timestamp" }
+			}
+		},
+		{
+			$project: {
+				userId: "$_id.userId",
+				username: 1,
+				sessionId: "$_id.sessionId",
+				coordinates: 1,
+				firstTimestamp: 1,
+				lastTimestamp: 1,
+			}
+		},
+		{
+			$addFields: {
+				sessionDuration: { $divide: [{ $subtract: ["$lastTimestamp", "$firstTimestamp"] }, 60] } // in minutes
+			}
+		},
+		{
+			$sort: { "sessionDuration": -1 }
+		},
+		{
+			$group: {
+				_id: "$userId",
+				topSession: { $first: "$$ROOT" } // Take the top session per user
+			}
+		},
+		{
+			$replaceRoot: { newRoot: "$topSession" }
+		},
+		{
+			$sort: { "sessionDuration": -1 } // Final sorting by session duration
+		},
+		{
+			$limit: limit
+		}
+	]).toArray();
+	
+	const topSessions = result.map(session => {
+		let sessionDistance = 0;
+		let sessionDuration = 0;
+		const coordinates = session.coordinates;
+		
+		for (let i = 1; i < coordinates.length; i++) {
+			const prev = coordinates[i - 1];
+			const curr = coordinates[i];
+			
+			const timeDiff = curr.timestamp - prev.timestamp;
+			if (timeDiff < 3600) {  // If the time difference is less than 1 hour, it's considered part of the session
+				const distance = haversine(
+						{ lat: prev.latitude, lon: prev.longitude },
+						{ lat: curr.latitude, lon: curr.longitude }
+				);
+				sessionDistance += distance;
+				sessionDuration += timeDiff;
+			}
+		}
+		
+		return {
+			userId: session.userId,
+			username: session.username,
+			sessionId: session.sessionId,
+			sessionLength: coordinates.length,
+			distance: sessionDistance / 1000, // Convert to kilometers
+			duration: sessionDuration / 60 // Convert to minutes
+		};
+	});
+	
+	return topSessions.sort((a, b) => b.distance - a.distance);
+};
+
+
+
+const getTopDailyDistances = async (period, limit) => {
+	const { startTimestamp, endTimestamp } = getPeriodTimestamps(period);
+	const collection = db.collection('locations');
+	
+	const result = await collection.aggregate([
+		{
+			$match: {
+				timestamp: { $gte: startTimestamp, $lte: endTimestamp }
+			}
+		},
+		{
+			$group: {
+				_id: {
+					userId: "$userId",
+					date: {
+						$dateToString: {
+							format: "%Y-%m-%d",
+							date: { $toDate: { $multiply: ["$timestamp", 1000] } }
+						}
+					}
+				},
+				username: { $first: "$username" },
+				coordinates: {
+					$push: {
+						latitude: "$latitude",
+						longitude: "$longitude",
+						sessionId: "$sessionId",
+						timestamp: "$timestamp"
+					}
+				}
+			}
+		},
+		{ $sort: { "_id.date": 1, "_id.userId": 1 } }
+	]).toArray();
+	
+	const dailyDistances = result.map(day => {
+		let dailyDistance = 0;
+		let lastSessionId = null;
+		let lastCoordinate = null;
+		
+		// Ensure the coordinates are sorted by sessionId and timestamp
+		const sortedCoordinates = day.coordinates.sort((a, b) => {
+			if (a.sessionId === b.sessionId) {
+				return a.timestamp - b.timestamp;
+			}
+			return a.sessionId - b.sessionId;
+		});
+		
+		for (let i = 0; i < sortedCoordinates.length; i++) {
+			const coordinate = sortedCoordinates[i];
+			
+			if (lastCoordinate !== null && lastSessionId === coordinate.sessionId) {
+				const distance = haversine(
+						{ lat: lastCoordinate.latitude, lon: lastCoordinate.longitude },
+						{ lat: coordinate.latitude, lon: coordinate.longitude }
+				);
+				dailyDistance += distance;
+			}
+			
+			lastCoordinate = coordinate;
+			lastSessionId = coordinate.sessionId;
+		}
+		
+		return {
+			userId: day._id.userId,
+			username: day.username,
+			date: day._id.date,
+			distance: dailyDistance / 1000, // in kilometers
+		};
+	});
+	
+	// Group by user and keep the entry with the highest distance for each user
+	const uniqueUsers = {};
+	dailyDistances.forEach(entry => {
+		if (!uniqueUsers[entry.userId] || uniqueUsers[entry.userId].distance < entry.distance) {
+			uniqueUsers[entry.userId] = entry;
+		}
+	});
+	
+	// Convert the object back to an array and sort by distance
+	const uniqueDailyDistances = Object.values(uniqueUsers);
+	uniqueDailyDistances.sort((a, b) => b.distance - a.distance);
+	
+	// Return the top results
+	return uniqueDailyDistances.slice(0, limit);
+};
+
+
+
+const getPeriodTimestamps = (period) => {
+	const now = new Date();
+	let startTimestamp, endTimestamp;
+	
+	switch (period) {
+		case 'this_week':
+		{
+			const dayOfWeek = now.getDay();
+			const monday = new Date(now);
+			monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+			monday.setHours(0, 0, 0, 0);
+			const sunday = new Date(monday);
+			sunday.setDate(monday.getDate() + 6);
+			sunday.setHours(23, 59, 59, 999);
+			
+			startTimestamp = Math.floor(monday.getTime() / 1000);
+			endTimestamp = Math.floor(sunday.getTime() / 1000);
+		}
+			break;
+		
+		case 'last_week':
+		{
+			const dayOfWeek = now.getDay();
+			const lastMonday = new Date(now);
+			lastMonday.setDate(now.getDate() - (dayOfWeek === 0 ? 13 : dayOfWeek + 6));
+			lastMonday.setHours(0, 0, 0, 0);
+			const lastSunday = new Date(lastMonday);
+			lastSunday.setDate(lastMonday.getDate() + 6);
+			lastSunday.setHours(23, 59, 59, 999);
+			
+			startTimestamp = Math.floor(lastMonday.getTime() / 1000);
+			endTimestamp = Math.floor(lastSunday.getTime() / 1000);
+		}
+			break;
+		
+		case 'this_month':
+		{
+			const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+			firstDayOfMonth.setHours(0, 0, 0, 0);
+			const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+			lastDayOfMonth.setHours(23, 59, 59, 999);
+			
+			startTimestamp = Math.floor(firstDayOfMonth.getTime() / 1000);
+			endTimestamp = Math.floor(lastDayOfMonth.getTime() / 1000);
+		}
+			break;
+		
+		case 'last_month':
+		{
+			const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+			firstDayOfLastMonth.setHours(0, 0, 0, 0);
+			const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+			lastDayOfLastMonth.setHours(23, 59, 59, 999);
+			
+			startTimestamp = Math.floor(firstDayOfLastMonth.getTime() / 1000);
+			endTimestamp = Math.floor(lastDayOfLastMonth.getTime() / 1000);
+		}
+			break;
+		
+		default:
+			throw new Error('Invalid period');
+	}
+	
+	return { startTimestamp, endTimestamp };
+};
+
+app.get('/api/top-sessions/:period', async (req, res) => {
+	try {
+		const { period } = req.params;
+		const limit = parseInt(req.query.limit) || 50;
+		
+		if (!['this_week', 'last_week', 'this_month', 'last_month'].includes(period)) {
+			return res.status(400).json({ error: 'Invalid period' });
+		}
+		
+		const topSessions = await getTopLongestSessions(period, limit);
+		res.json({ period, topSessions });
+	} catch (error) {
+		console.error(`Error calculating top sessions for ${period}:`, error);
+		res.status(500).json({ error: 'Internal server error' });
+	}
+});
+
+app.get('/api/top-daily-distances/:period', async (req, res) => {
+	try {
+		const { period } = req.params;
+		const limit = parseInt(req.query.limit) || 50;
+		
+		if (!['this_week', 'last_week', 'this_month', 'last_month'].includes(period)) {
+			return res.status(400).json({ error: 'Invalid period' });
+		}
+		
+		const topDailyDistances = await getTopDailyDistances(period, limit);
+		res.json({ period, topDailyDistances });
+	} catch (error) {
+		console.error(`Error calculating top daily distances for ${period}:`, error);
 		res.status(500).json({ error: 'Internal server error' });
 	}
 });
