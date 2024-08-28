@@ -709,7 +709,7 @@ app.get('/api/top-daily-distances/:period', async (req, res) => {
 	}
 });
 
-app.get('/user-category-by-distance/:userId', async (req, res) => {
+app.get('/api/user-category-by-distance/:userId', async (req, res) => {
 	try {
 		const userId = parseInt(req.params.userId);
 		const collection = db.collection('locations');
@@ -767,76 +767,125 @@ app.get('/user-category-by-distance/:userId', async (req, res) => {
 	}
 });
 
-app.get('/total-category-by-distance/:period', async (req, res) => {
+app.get('/api/total-category-by-distance/:period', async (req, res) => {
     try {
         const { period } = req.params;
         const collection = db.collection('locations');
         
-        // Определяем временные рамки для фильтрации
-        const now = new Date();
-        let startDate, endDate;
+        let startTimestamp, endTimestamp;
         
+        // Используем логику определения временных рамок из правильной функции
+        const now = new Date();
         switch(period) {
             case 'this_week':
-                startDate = new Date(now.setDate(now.getDate() - now.getDay()));
-                endDate = new Date(now.setDate(now.getDate() - now.getDay() + 6));
-                break;
+            {
+                const dayOfWeek = now.getDay();
+                const monday = new Date(now);
+                monday.setHours(0, 0, 0, 0);
+                monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                const sunday = new Date(monday);
+                sunday.setDate(monday.getDate() + 6);
+                sunday.setHours(23, 59, 59, 999);
+                
+                startTimestamp = Math.floor(monday.getTime() / 1000);
+                endTimestamp = Math.floor(sunday.getTime() / 1000);
+            }
+            break;
             case 'last_week':
-                startDate = new Date(now.setDate(now.getDate() - now.getDay() - 7));
-                endDate = new Date(now.setDate(now.getDate() - now.getDay() - 1));
-                break;
+            {
+                const lastWeek = new Date(now);
+                lastWeek.setDate(lastWeek.getDate() - 7);
+                
+                const dayOfWeek = lastWeek.getDay();
+                const lastMonday = new Date(lastWeek);
+                lastMonday.setHours(0, 0, 0, 0);
+                lastMonday.setDate(lastWeek.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                const lastSunday = new Date(lastMonday);
+                lastSunday.setDate(lastMonday.getDate() + 6);
+                lastSunday.setHours(23, 59, 59, 999);
+                
+                startTimestamp = Math.floor(lastMonday.getTime() / 1000);
+                endTimestamp = Math.floor(lastSunday.getTime() / 1000);
+            }
+            break;
             case 'this_month':
-                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-                endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                break;
+            {
+                const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                lastDayOfMonth.setHours(23, 59, 59, 999);
+                
+                startTimestamp = Math.floor(firstDayOfMonth.getTime() / 1000);
+                endTimestamp = Math.floor(lastDayOfMonth.getTime() / 1000);
+            }
+            break;
             case 'last_month':
-                startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                endDate = new Date(now.getFullYear(), now.getMonth(), 0);
-                break;
+            {
+                const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+                lastDayOfLastMonth.setHours(23, 59, 59, 999);
+                
+                startTimestamp = Math.floor(firstDayOfLastMonth.getTime() / 1000);
+                endTimestamp = Math.floor(lastDayOfLastMonth.getTime() / 1000);
+            }
+            break;
             default:
                 return res.status(400).json({ error: 'Invalid period parameter' });
         }
-        
-        // Конвертируем даты в timestamp для сравнения с данными в базе
-        const startTimestamp = Math.floor(startDate.getTime() / 1000);
-        const endTimestamp = Math.floor(endDate.getTime() / 1000);
 
-        const allCoordinates = await collection.find({
-            timestamp: { $gte: startTimestamp, $lte: endTimestamp }
-        }).sort({ userId: 1, sessionId: 1, timestamp: 1 }).toArray();
-        
-        if (allCoordinates.length === 0) {
+        const result = await collection.aggregate([
+            {
+                $match: {
+                    timestamp: { $gte: startTimestamp, $lte: endTimestamp }
+                }
+            },
+            {
+                $group: {
+                    _id: { userId: "$userId", sessionId: "$sessionId" },
+                    coordinates: {
+                        $push: {
+                            latitude: "$latitude",
+                            longitude: "$longitude",
+                            timestamp: "$timestamp"
+                        }
+                    }
+                }
+            }
+        ]).toArray();
+
+        if (result.length === 0) {
             return res.status(404).json({ error: 'No data found for the specified period' });
         }
         
         let northDistance = 0;
         let southDistance = 0;
-        let lastPoint = null;
-        let lastSessionId = null;
-        let lastUserId = null;
         
-        for (const coord of allCoordinates) {
-            const currentPoint = { latitude: coord.latitude, longitude: coord.longitude };
+        for (const session of result) {
+            const coordinates = session.coordinates;
             
-            if (coord.userId !== lastUserId || coord.sessionId !== lastSessionId) {
-                lastPoint = currentPoint;
-                lastSessionId = coord.sessionId;
-                lastUserId = coord.userId;
-                continue;
+            for (let i = 1; i < coordinates.length; i++) {
+                const prev = coordinates[i - 1];
+                const curr = coordinates[i];
+                
+                // Проверяем, что точки принадлежат одной сессии (разница во времени менее часа)
+                if (curr.timestamp - prev.timestamp < 3600) {
+                    const distance = haversine(
+                        { lat: prev.latitude, lon: prev.longitude },
+                        { lat: curr.latitude, lon: curr.longitude }
+                    );
+                    
+                    if (curr.latitude >= centerLat) {
+                        northDistance += distance;
+                    } else {
+                        southDistance += distance;
+                    }
+                }
             }
-            
-            const distance = haversine(lastPoint, currentPoint) / 1000;
-            
-            if (coord.latitude >= centerLat) {
-                northDistance += distance;
-            } else {
-                southDistance += distance;
-            }
-            
-            lastPoint = currentPoint;
         }
         
-        const totalDistance = northDistance + southDistance;
+        const totalDistance = (northDistance + southDistance) / 1000; // Конвертируем в километры
+        northDistance /= 1000;
+        southDistance /= 1000;
+        
         const category = northDistance > southDistance ? 'north' : 'south';
         
         res.json({
