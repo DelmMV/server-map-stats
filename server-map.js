@@ -7,6 +7,7 @@ const app = express();
 const port = 5001;
 const url = 'mongodb://192.168.0.107:27017';
 const dbName = 'geolocation_db';
+const centerLat = 59.9505;
 
 let db;
 
@@ -72,6 +73,7 @@ app.get('/api/route/:userId', async (req, res) => {
 		res.status(500).json({ error: 'Что-то пошло не так' });
 	}
 });
+
 
 const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 	const collection = db.collection('locations');
@@ -201,7 +203,8 @@ const getTopUsers = async (period, limit) => {
 		userDistances.push({
 			userId: user._id,
 			username: user.username,
-			distance: stats.distance
+			distance: stats.distance,
+			averageSpeed: stats.speed
 		});
 	}
 	
@@ -706,5 +709,149 @@ app.get('/api/top-daily-distances/:period', async (req, res) => {
 	}
 });
 
-connectToMongoDB();
+app.get('/user-category-by-distance/:userId', async (req, res) => {
+	try {
+		const userId = parseInt(req.params.userId);
+		const collection = db.collection('locations');
+		
+		const userCoordinates = await collection.find({ userId: userId })
+				.sort({ sessionId: 1, timestamp: 1 })
+				.toArray();
+		
+		if (userCoordinates.length === 0) {
+			return res.status(404).json({ error: 'User not found' });
+		}
+		
+		let northDistance = 0;
+		let southDistance = 0;
+		let lastPoint = { latitude: userCoordinates[0].latitude, longitude: userCoordinates[0].longitude };
+		let lastSessionId = userCoordinates[0].sessionId;
+		
+		for (let i = 1; i < userCoordinates.length; i++) {
+			const coord = userCoordinates[i];
+			const currentPoint = { latitude: coord.latitude, longitude: coord.longitude };
+			
+			// If it's a new session, don't calculate distance from last point of previous session
+			if (coord.sessionId !== lastSessionId) {
+				lastPoint = currentPoint;
+				lastSessionId = coord.sessionId;
+				continue;
+			}
+			
+			const distance = haversine(lastPoint, currentPoint) / 1000; // Convert meters to kilometers
+			
+			if (coord.latitude >= centerLat) {
+				northDistance += distance;
+			} else {
+				southDistance += distance;
+			}
+			
+			lastPoint = currentPoint;
+		}
+		
+		const totalDistance = northDistance + southDistance;
+		const category = northDistance > southDistance ? 'north' : 'south';
+		
+		res.json({
+			userId: userId,
+			totalDistance: totalDistance.toFixed(2),
+			northDistance: northDistance.toFixed(2),
+			southDistance: southDistance.toFixed(2),
+			category: category,
+			percentageInNorth: ((northDistance / totalDistance) * 100).toFixed(2),
+			percentageInSouth: ((southDistance / totalDistance) * 100).toFixed(2)
+		});
+	} catch (error) {
+		console.error('Error processing request:', error);
+		res.status(500).json({ error: 'Internal server error' });
+	}
+});
 
+app.get('/total-category-by-distance/:period', async (req, res) => {
+    try {
+        const { period } = req.params;
+        const collection = db.collection('locations');
+        
+        // Определяем временные рамки для фильтрации
+        const now = new Date();
+        let startDate, endDate;
+        
+        switch(period) {
+            case 'this_week':
+                startDate = new Date(now.setDate(now.getDate() - now.getDay()));
+                endDate = new Date(now.setDate(now.getDate() - now.getDay() + 6));
+                break;
+            case 'last_week':
+                startDate = new Date(now.setDate(now.getDate() - now.getDay() - 7));
+                endDate = new Date(now.setDate(now.getDate() - now.getDay() - 1));
+                break;
+            case 'this_month':
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                break;
+            case 'last_month':
+                startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+                break;
+            default:
+                return res.status(400).json({ error: 'Invalid period parameter' });
+        }
+        
+        // Конвертируем даты в timestamp для сравнения с данными в базе
+        const startTimestamp = Math.floor(startDate.getTime() / 1000);
+        const endTimestamp = Math.floor(endDate.getTime() / 1000);
+
+        const allCoordinates = await collection.find({
+            timestamp: { $gte: startTimestamp, $lte: endTimestamp }
+        }).sort({ userId: 1, sessionId: 1, timestamp: 1 }).toArray();
+        
+        if (allCoordinates.length === 0) {
+            return res.status(404).json({ error: 'No data found for the specified period' });
+        }
+        
+        let northDistance = 0;
+        let southDistance = 0;
+        let lastPoint = null;
+        let lastSessionId = null;
+        let lastUserId = null;
+        
+        for (const coord of allCoordinates) {
+            const currentPoint = { latitude: coord.latitude, longitude: coord.longitude };
+            
+            if (coord.userId !== lastUserId || coord.sessionId !== lastSessionId) {
+                lastPoint = currentPoint;
+                lastSessionId = coord.sessionId;
+                lastUserId = coord.userId;
+                continue;
+            }
+            
+            const distance = haversine(lastPoint, currentPoint) / 1000;
+            
+            if (coord.latitude >= centerLat) {
+                northDistance += distance;
+            } else {
+                southDistance += distance;
+            }
+            
+            lastPoint = currentPoint;
+        }
+        
+        const totalDistance = northDistance + southDistance;
+        const category = northDistance > southDistance ? 'north' : 'south';
+        
+        res.json({
+            period: period,
+            totalDistance: totalDistance.toFixed(2),
+            northDistance: northDistance.toFixed(2),
+            southDistance: southDistance.toFixed(2),
+            category: category,
+            percentageInNorth: ((northDistance / totalDistance) * 100).toFixed(2),
+            percentageInSouth: ((southDistance / totalDistance) * 100).toFixed(2)
+        });
+    } catch (error) {
+        console.error('Error processing request:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+connectToMongoDB();
