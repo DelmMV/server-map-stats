@@ -29,6 +29,49 @@ async function connectToMongoDB() {
 
 app.use(cors());
 
+app.get('/api/heatmap', async (req, res) => {
+	try {
+		let { startDate, endDate } = req.query;
+		
+		if (!startDate || !endDate) {
+			return res.status(400).json({ error: 'Both startDate and endDate are required' });
+		}
+		
+		const startTimestamp = Math.floor(new Date(startDate).getTime() / 1000);
+		const endTimestamp = Math.floor(new Date(endDate).getTime() / 1000);
+		
+		const collection = db.collection('locations');
+		
+		const query = {
+			timestamp: {
+				$gte: startTimestamp,
+				$lte: endTimestamp
+			}
+		};
+		const data = await collection.find(query).toArray();
+		if (data.length === 0) {
+			return res.json([]);
+		}
+		
+		// Process data for heatmap (group by location and count occurrences)
+		const heatmapData = data.reduce((acc, loc) => {
+			const key = `${loc.latitude},${loc.longitude}`;
+			if (!acc[key]) {
+				acc[key] = { latitude: loc.latitude, longitude: loc.longitude, intensity: 0 };
+			}
+			acc[key].intensity += 1;
+			return acc;
+		}, {});
+		
+		const result = Object.values(heatmapData);
+		
+		res.json(result);
+	} catch (error) {
+		console.error('Error fetching heatmap data:', error);
+		res.status(500).json({ error: 'Internal server error', message: error.message });
+	}
+});
+
 
 app.get('/api/route/:userId', async (req, res) => {
 	const { userId } = req.params;
