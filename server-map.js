@@ -17,7 +17,7 @@ async function connectToMongoDB() {
 		await client.connect();
 		console.log('Connected successfully to MongoDB');
 		db = client.db(dbName);
-		
+		scheduleMonthlyHeatmapUpdates();
 		app.listen(port, () => {
 			console.log(`Server running on http://localhost:${port}`);
 		});
@@ -28,6 +28,117 @@ async function connectToMongoDB() {
 }
 
 app.use(cors());
+
+const updateMonthlyHeatmap = async (year, month) => {
+    const collection = db.collection('locations');
+    const heatmapCollection = db.collection('monthly_heatmaps');
+
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
+    const startTimestamp = Math.floor(startDate.getTime() / 1000);
+    const endTimestamp = Math.floor(endDate.getTime() / 1000);
+
+    const query = {
+        timestamp: {
+            $gte: startTimestamp,
+            $lte: endTimestamp
+        }
+    };
+
+    const data = await collection.find(query).toArray();
+
+    const heatmapData = data.reduce((acc, loc) => {
+        const key = `${loc.latitude.toFixed(3)},${loc.longitude.toFixed(3)}`;
+        if (!acc[key]) {
+            acc[key] = { latitude: loc.latitude, longitude: loc.longitude, intensity: 0 };
+        }
+        acc[key].intensity += 1;
+        return acc;
+    }, {});
+
+    const result = Object.values(heatmapData);
+
+    await heatmapCollection.updateOne(
+        { year, month },
+        { $set: { heatmapData: result } },
+        { upsert: true }
+    );
+
+    console.log(`Updated heatmap data for ${year}-${month}`);
+};
+
+const scheduleMonthlyHeatmapUpdates = () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+
+    // Обновляем данные за текущий и предыдущий месяц
+    updateMonthlyHeatmap(currentYear, currentMonth);
+    updateMonthlyHeatmap(currentYear, currentMonth - 1);
+
+    // Планируем следующее обновление через день
+    setTimeout(scheduleMonthlyHeatmapUpdates, 24 * 60 * 60 * 1000);
+};
+
+app.get('/api/monthly-heatmap/:year/:month', async (req, res) => {
+    try {
+        const year = parseInt(req.params.year);
+        const month = parseInt(req.params.month);
+
+        if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+            return res.status(400).json({ error: 'Invalid year or month' });
+        }
+
+        const heatmapCollection = db.collection('monthly_heatmaps');
+        const result = await heatmapCollection.findOne({ year, month });
+
+        if (!result) {
+            return res.status(404).json({ error: 'Heatmap data not found for the specified month' });
+        }
+
+        res.json(result.heatmapData);
+    } catch (error) {
+        console.error('Error fetching monthly heatmap data:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/api/yearly-heatmap/:year', async (req, res) => {
+    try {
+        const year = parseInt(req.params.year);
+
+        if (isNaN(year)) {
+            return res.status(400).json({ error: 'Invalid year' });
+        }
+
+        const heatmapCollection = db.collection('monthly_heatmaps');
+        const results = await heatmapCollection.find({ year }).toArray();
+
+        if (results.length === 0) {
+            return res.json({ heatmapData: [], message: 'No data available for this year' });
+        }
+
+        // Объединяем данные за все месяцы
+        const combinedHeatmapData = results.reduce((acc, month) => {
+            month.heatmapData.forEach(point => {
+                const key = `${point.latitude},${point.longitude}`;
+                if (!acc[key]) {
+                    acc[key] = { ...point };
+                } else {
+                    acc[key].intensity += point.intensity;
+                }
+            });
+            return acc;
+        }, {});
+
+        const yearlyHeatmapData = Object.values(combinedHeatmapData);
+
+        res.json(yearlyHeatmapData);
+    } catch (error) {
+        console.error('Error fetching yearly heatmap data:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 app.get('/api/heatmap', async (req, res) => {
 	try {
