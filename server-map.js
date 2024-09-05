@@ -103,6 +103,20 @@ app.get('/api/monthly-heatmap/:year/:month', async (req, res) => {
     }
 });
 
+app.get('/api/charging-stations', async (req, res) => {
+  try {
+    const response = await fetch('https://electro.club/loadmapjson?filter=sockets');
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Error fetching charging stations:', error);
+    res.status(500).json({ error: 'Failed to fetch charging stations' });
+  }
+});
+
 app.get('/api/yearly-heatmap/:year', async (req, res) => {
     try {
         const year = parseInt(req.params.year);
