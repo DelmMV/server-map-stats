@@ -1,7 +1,10 @@
 const express = require('express');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 const haversine = require('haversine-distance');
+const multer = require('multer');
+const path = require('path');
 const cors = require('cors')
+require('dotenv').config()
 
 const app = express();
 const port = 5001;
@@ -12,7 +15,7 @@ const centerLat = 59.9505;
 let db;
 
 async function connectToMongoDB() {
-	const client = new MongoClient(url, { useNewUrlParser: true, useUnifiedTopology: true });
+	const client = new MongoClient(url);
 	try {
 		await client.connect();
 		console.log('Connected successfully to MongoDB');
@@ -26,8 +29,104 @@ async function connectToMongoDB() {
 		process.exit(1); // Завершаем процесс, если подключение не удалось
 	}
 }
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use(cors());
+
+// Настройка multer для загрузки фотографий
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage: storage });
+const apiBaseUrl = process.env.API_BASE_URL || 'https://monopiter.ru';
+
+// Получение списка зарядных станций
+app.get('/api/charging-stations', async (req, res) => {
+  try {
+    const stations = await db.collection('charging_stations').find().toArray();
+    res.json(stations);
+  } catch (error) {
+    console.error('Error fetching charging stations:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+// Добавление новой зарядной станции
+app.post('/api/charging-stations', upload.single('photo'), async (req, res) => {
+  try {
+    const { latitude, longitude, comment, userId, addedBy, addedAt } = req.body;
+    const photo = req.file ? `${apiBaseUrl}/uploads/${req.file.filename}` : null;
+
+    const station = {
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      comment,
+      photo,
+      userId: parseInt(userId),
+      addedBy: JSON.parse(addedBy),
+      addedAt: new Date(addedAt),
+    };
+
+    const result = await db.collection('charging_stations').insertOne(station);
+    res.status(201).json({ ...station, _id: result.insertedId });
+  } catch (error) {
+    console.error('Error adding charging station:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Обновление зарядной станции
+app.put('/api/charging-stations/:id', upload.single('photo'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { latitude, longitude, comment } = req.body;
+    const updateData = {
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      comment
+    };
+
+    if (req.file) {
+      updateData.photo = `${apiBaseUrl}/uploads/${req.file.filename}`;
+    }
+
+    const result = await db.collection('charging_stations').updateOne(
+      { _id: new ObjectId(id) },  // Используем new ObjectId(id) здесь
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'Charging station not found' });
+    }
+
+    res.json({ message: 'Charging station updated successfully' });
+  } catch (error) {
+    console.error('Error updating charging station:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Удаление зарядной станции
+app.delete('/api/charging-stations/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.collection('charging_stations').deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Charging station not found' });
+    }
+
+    res.json({ message: 'Charging station deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting charging station:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 const updateMonthlyHeatmap = async (year, month) => {
     const collection = db.collection('locations');
@@ -101,20 +200,6 @@ app.get('/api/monthly-heatmap/:year/:month', async (req, res) => {
         console.error('Error fetching monthly heatmap data:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
-});
-
-app.get('/api/charging-stations', async (req, res) => {
-  try {
-    const response = await fetch('https://electro.club/loadmapjson?filter=sockets');
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    console.error('Error fetching charging stations:', error);
-    res.status(500).json({ error: 'Failed to fetch charging stations' });
-  }
 });
 
 app.get('/api/yearly-heatmap/:year', async (req, res) => {
