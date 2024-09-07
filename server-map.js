@@ -43,7 +43,7 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
 const apiBaseUrl = process.env.API_BASE_URL || 'https://monopiter.ru';
 
 // Получение списка зарядных станций
