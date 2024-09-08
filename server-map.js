@@ -68,7 +68,7 @@ app.post('/api/charging-stations', upload.single('photo'), async (req, res) => {
       longitude: parseFloat(longitude),
       comment,
       photo,
-      userId: parsedUserId,
+      userId: JSON.parse(addedBy.id),
       addedBy: JSON.parse(addedBy),
       addedAt: new Date(addedAt),
     };
