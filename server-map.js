@@ -61,13 +61,14 @@ app.post('/api/charging-stations', upload.single('photo'), async (req, res) => {
   try {
     const { latitude, longitude, comment, userId, addedBy, addedAt } = req.body;
     const photo = req.file ? `${apiBaseUrl}/uploads/${req.file.filename}` : null;
+		const parsedUserId = parseInt(userId, 10);
 
     const station = {
       latitude: parseFloat(latitude),
       longitude: parseFloat(longitude),
       comment,
       photo,
-      userId: parseInt(userId),
+      userId: parsedUserId,
       addedBy: JSON.parse(addedBy),
       addedAt: new Date(addedAt),
     };
