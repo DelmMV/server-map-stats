@@ -56,13 +56,13 @@ app.get('/api/charging-stations', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-// Добавление новой зарядной станции
+
 app.post('/api/charging-stations', upload.single('photo'), async (req, res) => {
   try {
-    const { latitude, longitude, comment, userId, addedBy, addedAt } = req.body;
+    const { latitude, longitude, comment, userId, addedBy, addedAt, is24Hours, markerType } = req.body;
     const photo = req.file ? `${apiBaseUrl}/uploads/${req.file.filename}` : null;
-		const parsedUserId = parseInt(userId, 10);
-console.log(parsedUserId)
+    const parsedUserId = parseInt(userId, 10);
+
     const station = {
       latitude: parseFloat(latitude),
       longitude: parseFloat(longitude),
@@ -71,6 +71,8 @@ console.log(parsedUserId)
       userId: parsedUserId,
       addedBy: JSON.parse(addedBy),
       addedAt: new Date(addedAt),
+      is24Hours: is24Hours === 'true',
+      markerType
     };
 
     const result = await db.collection('charging_stations').insertOne(station);
@@ -80,16 +82,17 @@ console.log(parsedUserId)
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-// Обновление зарядной станции
+// Добавление новой зарядной станции
 app.put('/api/charging-stations/:id', upload.single('photo'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { latitude, longitude, comment } = req.body;
+    const { latitude, longitude, comment, is24Hours, markerType } = req.body;
     const updateData = {
       latitude: parseFloat(latitude),
       longitude: parseFloat(longitude),
-      comment
+      comment,
+      is24Hours: is24Hours === 'true',
+      markerType
     };
 
     if (req.file) {
@@ -97,7 +100,7 @@ app.put('/api/charging-stations/:id', upload.single('photo'), async (req, res) =
     }
 
     const result = await db.collection('charging_stations').updateOne(
-      { _id: new ObjectId(id) },  // Используем new ObjectId(id) здесь
+      { _id: new ObjectId(id) },
       { $set: updateData }
     );
 
