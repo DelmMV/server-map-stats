@@ -2,6 +2,7 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const haversine = require('haversine-distance');
 const multer = require('multer');
+const sharp = require('sharp');
 const path = require('path');
 const cors = require('cors')
 require('dotenv').config()
@@ -34,16 +35,56 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(cors());
 
 // Настройка multer для загрузки фотографий
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
+// const storage = multer.diskStorage({
+//   destination: (req, file, cb) => {
+//     cb(null, 'uploads/');
+//   },
+//   filename: (req, file, cb) => {
+//     cb(null, Date.now() + path.extname(file.originalname));
+//   }
+// });
+
+const compressImage = async (buffer) => {
+    try {
+        const compressedImageBuffer = await sharp(buffer)
+            .resize({ width: 1024, height: 1024, fit: 'inside' })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+        return compressedImageBuffer;
+    } catch (error) {
+        console.error('Error compressing image:', error);
+        throw error;
+    }
+};
+
+// Middleware для сжатия изображения перед загрузкой
+const compressImageMiddleware = async (req, res, next) => {
+    if (!req.file) {
+        return next();
+    }
+
+    try {
+        const compressedImageBuffer = await compressImage(req.file.buffer);
+        req.file.buffer = compressedImageBuffer;
+        next();
+    } catch (error) {
+        next(error);
+    }
+};
+
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 10 * 1024 * 1024 }, // Увеличиваем лимит до 10 МБ
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Not an image! Please upload an image.'), false);
+        }
+    }
 });
 
-const upload = multer({ storage: storage, limits: { fileSize: 7 * 1024 * 1024 } });
 const apiBaseUrl = process.env.API_BASE_URL || 'https://monopiter.ru';
 
 // Получение списка зарядных станций
@@ -60,14 +101,23 @@ app.get('/api/charging-stations', async (req, res) => {
 app.post('/api/charging-stations', upload.single('photo'), async (req, res) => {
   try {
     const { latitude, longitude, comment, userId, addedBy, addedAt, is24Hours, markerType } = req.body;
-    const photo = req.file ? `${apiBaseUrl}/uploads/${req.file.filename}` : null;
     const parsedUserId = parseInt(userId, 10);
+
+    let photoUrl = null;
+    if (req.file) {
+      const filename = `${Date.now()}-${req.file.originalname}`;
+      const filePath = path.join(__dirname, 'uploads', filename);
+      await sharp(req.file.buffer)
+        .resize({ width: 800, height: 800, fit: 'inside' })
+        .toFile(filePath);
+      photoUrl = `${apiBaseUrl}/uploads/${filename}`;
+    }
 
     const station = {
       latitude: parseFloat(latitude),
       longitude: parseFloat(longitude),
       comment,
-      photo,
+      photo: photoUrl,
       userId: parsedUserId,
       addedBy: JSON.parse(addedBy),
       addedAt: new Date(addedAt),
@@ -82,6 +132,7 @@ app.post('/api/charging-stations', upload.single('photo'), async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 // Добавление новой зарядной станции
 app.put('/api/charging-stations/:id', upload.single('photo'), async (req, res) => {
   try {
@@ -96,7 +147,12 @@ app.put('/api/charging-stations/:id', upload.single('photo'), async (req, res) =
     };
 
     if (req.file) {
-      updateData.photo = `${apiBaseUrl}/uploads/${req.file.filename}`;
+      const filename = `${Date.now()}-${req.file.originalname}`;
+      const filePath = path.join(__dirname, 'uploads', filename);
+      await sharp(req.file.buffer)
+        .resize({ width: 800, height: 800, fit: 'inside' })
+        .toFile(filePath);
+      updateData.photo = `${apiBaseUrl}/uploads/${filename}`;
     }
 
     const result = await db.collection('charging_stations').updateOne(
@@ -106,7 +162,7 @@ app.put('/api/charging-stations/:id', upload.single('photo'), async (req, res) =
 
     if (result.matchedCount === 0) {
       return res.status(404).json({ error: 'Charging station not found' });
-    }
+    } 
 
     res.json({ message: 'Charging station updated successfully' });
   } catch (error) {
