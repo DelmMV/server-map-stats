@@ -34,16 +34,6 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use(cors());
 
-// Настройка multer для загрузки фотографий
-// const storage = multer.diskStorage({
-//   destination: (req, file, cb) => {
-//     cb(null, 'uploads/');
-//   },
-//   filename: (req, file, cb) => {
-//     cb(null, Date.now() + path.extname(file.originalname));
-//   }
-// });
-
 const compressImage = async (buffer) => {
     try {
         const compressedImageBuffer = await sharp(buffer)
@@ -99,94 +89,237 @@ app.get('/api/charging-stations', async (req, res) => {
 });
 
 app.post('/api/charging-stations', upload.single('photo'), async (req, res) => {
-  try {
-    const { latitude, longitude, comment, userId, addedBy, addedAt, is24Hours, markerType } = req.body;
-    const parsedUserId = parseInt(userId, 10);
+    try {
+        const { latitude, longitude, comment, userId, addedBy, addedAt, is24Hours, markerType } = req.body;
+        const parsedUserId = parseInt(userId, 10);
 
-    let photoUrl = null;
-    if (req.file) {
-      const filename = `${Date.now()}-${req.file.originalname}`;
-      const filePath = path.join(__dirname, 'uploads', filename);
-      await sharp(req.file.buffer)
-        .resize({ width: 800, height: 800, fit: 'inside' })
-        .toFile(filePath);
-      photoUrl = `${apiBaseUrl}/uploads/${filename}`;
+        let photoUrl = null;
+        if (req.file) {
+            const filename = `${Date.now()}-${req.file.originalname}`;
+            const filePath = path.join(__dirname, 'uploads', filename);
+            await sharp(req.file.buffer)
+                .resize({ width: 800, height: 800, fit: 'inside' })
+                .toFile(filePath);
+            photoUrl = `${apiBaseUrl}/uploads/${filename}`;
+        }
+
+        const station = {
+            latitude: parseFloat(latitude),
+            longitude: parseFloat(longitude),
+            comment,
+            photo: photoUrl,
+            userId: parsedUserId,
+            addedBy: JSON.parse(addedBy),
+            addedAt: new Date(addedAt),
+            is24Hours: is24Hours === 'true',
+            markerType,
+            likes: 0,
+            dislikes: 0,
+            likedBy: [],
+            dislikedBy: []
+        };
+
+        const result = await db.collection('charging_stations').insertOne(station);
+        res.status(201).json({ ...station, _id: result.insertedId });
+    } catch (error) {
+        console.error('Error adding charging station:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    const station = {
-      latitude: parseFloat(latitude),
-      longitude: parseFloat(longitude),
-      comment,
-      photo: photoUrl,
-      userId: parsedUserId,
-      addedBy: JSON.parse(addedBy),
-      addedAt: new Date(addedAt),
-      is24Hours: is24Hours === 'true',
-      markerType
-    };
-
-    const result = await db.collection('charging_stations').insertOne(station);
-    res.status(201).json({ ...station, _id: result.insertedId });
-  } catch (error) {
-    console.error('Error adding charging station:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 // Добавление новой зарядной станции
 app.put('/api/charging-stations/:id', upload.single('photo'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { latitude, longitude, comment, is24Hours, markerType } = req.body;
-    const updateData = {
-      latitude: parseFloat(latitude),
-      longitude: parseFloat(longitude),
-      comment,
-      is24Hours: is24Hours === 'true',
-      markerType
-    };
+    try {
+        const { id } = req.params;
+        const { latitude, longitude, comment, is24Hours, markerType } = req.body;
+        const updateData = {
+            latitude: parseFloat(latitude),
+            longitude: parseFloat(longitude),
+            comment,
+            is24Hours: is24Hours === 'true',
+            markerType
+        };
 
-    if (req.file) {
-      const filename = `${Date.now()}-${req.file.originalname}`;
-      const filePath = path.join(__dirname, 'uploads', filename);
-      await sharp(req.file.buffer)
-        .resize({ width: 800, height: 800, fit: 'inside' })
-        .toFile(filePath);
-      updateData.photo = `${apiBaseUrl}/uploads/${filename}`;
+        if (req.file) {
+            const filename = `${Date.now()}-${req.file.originalname}`;
+            const filePath = path.join(__dirname, 'uploads', filename);
+            await sharp(req.file.buffer)
+                .resize({ width: 800, height: 800, fit: 'inside' })
+                .toFile(filePath);
+            updateData.photo = `${apiBaseUrl}/uploads/${filename}`;
+        }
+
+        const result = await db.collection('charging_stations').updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updateData }
+        );
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ error: 'Charging station not found' });
+        }
+
+        res.json({ message: 'Charging station updated successfully' });
+    } catch (error) {
+        console.error('Error updating charging station:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    const result = await db.collection('charging_stations').updateOne(
-      { _id: new ObjectId(id) },
-      { $set: updateData }
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ error: 'Charging station not found' });
-    } 
-
-    res.json({ message: 'Charging station updated successfully' });
-  } catch (error) {
-    console.error('Error updating charging station:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 // Удаление зарядной станции
 app.delete('/api/charging-stations/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await db.collection('charging_stations').deleteOne({ _id: new ObjectId(id) });
+    try {
+        const { id } = req.params;
+        const result = await db.collection('charging_stations').deleteOne({ _id: new ObjectId(id) });
 
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ error: 'Charging station not found' });
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ error: 'Charging station not found' });
+        }
+
+        res.json({ message: 'Charging station deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting charging station:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    res.json({ message: 'Charging station deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting charging station:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
+
+app.post('/api/charging-stations/:id/like/:userId', async (req, res) => {
+    try {
+        const { id, userId } = req.params;
+
+        if (!id || !userId) {
+            return res.status(400).json({ error: 'Missing id or userId' });
+        }
+
+        const station = await db.collection('charging_stations').findOne({ _id: new ObjectId(id) });
+
+        if (!station) {
+            return res.status(404).json({ error: 'Station not found' });
+        }
+
+        const likedBy = Array.isArray(station.likedBy) ? station.likedBy : [];
+        const dislikedBy = Array.isArray(station.dislikedBy) ? station.dislikedBy : [];
+
+        let updateOperation;
+
+        if (likedBy.includes(parseInt(userId))) {
+            // Если пользователь уже лайкнул, убираем лайк
+            updateOperation = {
+                $inc: { likes: -1 },
+                $pull: { likedBy: parseInt(userId) }
+            };
+        } else {
+            // Если пользователь еще не лайкнул
+            updateOperation = {
+                $inc: { likes: 1 },
+                $push: { likedBy: parseInt(userId) },
+                $pull: { dislikedBy: parseInt(userId) }
+            };
+
+            // Если был дизлайк, уменьшаем счетчик дизлайков
+            if (dislikedBy.includes(parseInt(userId))) {
+                updateOperation.$inc.dislikes = -1;
+            }
+        }
+
+        const result = await db.collection('charging_stations').updateOne(
+            { _id: new ObjectId(id) },
+            updateOperation
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(400).json({ error: 'Failed to update station' });
+        }
+
+        res.json({ message: 'Station like status updated successfully' });
+    } catch (error) {
+        console.error('Error updating station like:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/api/charging-stations/:id/dislike/:userId', async (req, res) => {
+    try {
+        const { id, userId } = req.params;
+
+        if (!id || !userId) {
+            return res.status(400).json({ error: 'Missing id or userId' });
+        }
+
+        const station = await db.collection('charging_stations').findOne({ _id: new ObjectId(id) });
+
+        if (!station) {
+            return res.status(404).json({ error: 'Station not found' });
+        }
+
+        const likedBy = Array.isArray(station.likedBy) ? station.likedBy : [];
+        const dislikedBy = Array.isArray(station.dislikedBy) ? station.dislikedBy : [];
+
+        let updateOperation;
+
+        if (dislikedBy.includes(parseInt(userId))) {
+            // Если пользователь уже дизлайкнул, убираем дизлайк
+            updateOperation = {
+                $inc: { dislikes: -1 },
+                $pull: { dislikedBy: parseInt(userId) }
+            };
+        } else {
+            // Если пользователь еще не дизлайкнул
+            updateOperation = {
+                $inc: { dislikes: 1 },
+                $push: { dislikedBy: parseInt(userId) },
+                $pull: { likedBy: parseInt(userId) }
+            };
+
+            // Если был лайк, уменьшаем счетчик лайков
+            if (likedBy.includes(parseInt(userId))) {
+                updateOperation.$inc.likes = -1;
+            }
+        }
+
+        const result = await db.collection('charging_stations').updateOne(
+            { _id: new ObjectId(id) },
+            updateOperation
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(400).json({ error: 'Failed to update station' });
+        }
+
+        res.json({ message: 'Station dislike status updated successfully' });
+    } catch (error) {
+        console.error('Error updating station dislike:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/api/charging-stations/:id/like-status/:userId', async (req, res) => {
+    try {
+        const { id, userId } = req.params;
+
+        const station = await db.collection('charging_stations').findOne({ _id: new ObjectId(id) });
+
+        if (!station) {
+            return res.status(404).json({ error: 'Station not found' });
+        }
+
+        // Убедимся, что likedBy и dislikedBy существуют и являются массивами
+        const likedBy = Array.isArray(station.likedBy) ? station.likedBy : [];
+        const dislikedBy = Array.isArray(station.dislikedBy) ? station.dislikedBy : [];
+
+        const status = {
+            liked: likedBy.includes(parseInt(userId)),
+            disliked: dislikedBy.includes(parseInt(userId)),
+            likes: station.likes || 0,
+            dislikes: station.dislikes || 0
+        };
+
+        res.json(status);
+    } catch (error) {
+        console.error('Error fetching like status:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 
 const updateMonthlyHeatmap = async (year, month) => {
     const collection = db.collection('locations');
