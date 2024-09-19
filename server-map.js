@@ -47,21 +47,6 @@ const compressImage = async (buffer) => {
     }
 };
 
-// Middleware для сжатия изображения перед загрузкой
-const compressImageMiddleware = async (req, res, next) => {
-    if (!req.file) {
-        return next();
-    }
-
-    try {
-        const compressedImageBuffer = await compressImage(req.file.buffer);
-        req.file.buffer = compressedImageBuffer;
-        next();
-    } catch (error) {
-        next(error);
-    }
-};
-
 const storage = multer.memoryStorage();
 const upload = multer({
     storage: storage,
@@ -75,7 +60,7 @@ const upload = multer({
     }
 });
 
-const apiBaseUrl = process.env.API_BASE_URL || 'https://monopiter.ru';
+const apiBaseUrl = process.env.API_BASE_URL || 'https://api.monopiter.ru';
 
 // Получение списка зарядных станций
 app.get('/api/charging-stations', async (req, res) => {
