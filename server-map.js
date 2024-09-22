@@ -100,7 +100,8 @@ app.get('/api/active-users', async (req, res) => {
           lastActive: { $max: "$timestamp" },
           lastLocation: { $last: { latitude: "$latitude", longitude: "$longitude" } },
           username: { $first: "$username" },
-          avatarUrl: { $first: "$avatarUrl" }
+          avatarUrl: { $first: "$avatarUrl" },
+          coordinates: { $push: { latitude: "$latitude", longitude: "$longitude", timestamp: "$timestamp" } }
         }
       },
       {
@@ -111,10 +112,35 @@ app.get('/api/active-users', async (req, res) => {
           latitude: "$lastLocation.latitude",
           longitude: "$lastLocation.longitude",
           username: 1,
-          avatarUrl: 1
+          avatarUrl: 1,
+          coordinates: 1
         }
       }
     ]).toArray();
+
+    // Рассчитываем среднюю скорость для каждого пользователя
+    activeUsers.forEach(user => {
+      let totalDistance = 0;
+      let totalTime = 0;
+
+      for (let i = 1; i < user.coordinates.length; i++) {
+        const prev = user.coordinates[i - 1];
+        const curr = user.coordinates[i];
+        const distance = haversine(
+          { lat: prev.latitude, lon: prev.longitude },
+          { lat: curr.latitude, lon: curr.longitude }
+        );
+        const timeDiff = curr.timestamp - prev.timestamp;
+
+        if (timeDiff > 0 && timeDiff < 3600) { // Игнорируем большие разрывы во времени (более часа)
+          totalDistance += distance;
+          totalTime += timeDiff;
+        }
+      }
+
+      user.averageSpeed = totalTime > 0 ? (totalDistance / 1000) / (totalTime / 3600) : 0; // км/ч
+      delete user.coordinates; // Удаляем координаты из ответа, так как они больше не нужны
+    });
 
     // Шифруем URL аватаров
     activeUsers.forEach(user => {
@@ -334,7 +360,7 @@ app.post('/api/charging-stations/:id/dislike/:userId', async (req, res) => {
         let updateOperation;
 
         if (dislikedBy.includes(parseInt(userId))) {
-            // Если пользователь уже дизлайкнул, убираем дизлайк
+            // Если пользователь уже ��излайкнул, убираем дизлайк
             updateOperation = {
                 $inc: { dislikes: -1 },
                 $pull: { dislikedBy: parseInt(userId) }
