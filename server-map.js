@@ -87,6 +87,7 @@ function decryptUrl(encryptedUrl) {
 app.get('/api/active-users', async (req, res) => {
   try {
     const activeTimeWindow = 10 * 60; // 10 минут в секундах
+    const speedCalculationWindow = 120; // 2 минута в секундах
     const currentTimestamp = Math.floor(Date.now() / 1000);
     const activeUsers = await db.collection('locations').aggregate([
       {
@@ -120,19 +121,24 @@ app.get('/api/active-users', async (req, res) => {
 
     // Рассчитываем среднюю скорость для каждого пользователя
     activeUsers.forEach(user => {
+      const recentCoordinates = user.coordinates.filter(coord => 
+        coord.timestamp >= currentTimestamp - speedCalculationWindow
+      ).sort((a, b) => a.timestamp - b.timestamp);
+
       let totalDistance = 0;
       let totalTime = 0;
+      const minDistanceThreshold = 5; // минимальное расстояние в метрах для учета движения
 
-      for (let i = 1; i < user.coordinates.length; i++) {
-        const prev = user.coordinates[i - 1];
-        const curr = user.coordinates[i];
+      for (let i = 1; i < recentCoordinates.length; i++) {
+        const prev = recentCoordinates[i - 1];
+        const curr = recentCoordinates[i];
         const distance = haversine(
           { lat: prev.latitude, lon: prev.longitude },
           { lat: curr.latitude, lon: curr.longitude }
         );
         const timeDiff = curr.timestamp - prev.timestamp;
 
-        if (timeDiff > 0 && timeDiff < 3600) { // Игнорируем большие разрывы во времени (более часа)
+        if (distance >= minDistanceThreshold) {
           totalDistance += distance;
           totalTime += timeDiff;
         }
@@ -360,7 +366,7 @@ app.post('/api/charging-stations/:id/dislike/:userId', async (req, res) => {
         let updateOperation;
 
         if (dislikedBy.includes(parseInt(userId))) {
-            // Если пользователь уже ��излайкнул, убираем дизлайк
+            // Если пользователь уже излайкнул, убираем дизлайк
             updateOperation = {
                 $inc: { dislikes: -1 },
                 $pull: { dislikedBy: parseInt(userId) }
