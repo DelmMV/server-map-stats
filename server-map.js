@@ -6,6 +6,8 @@ const sharp = require('sharp');
 const path = require('path');
 const cors = require('cors')
 require('dotenv').config()
+const crypto = require('crypto');
+const fetch = require('node-fetch');
 
 const app = express();
 const port = 5001;
@@ -62,6 +64,96 @@ const upload = multer({
 
 const apiBaseUrl = process.env.API_BASE_URL || 'https://api.monopiter.ru';
 
+// Добавьте эту константу в начало файла, рядом с другими конфигурационными переменными
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY; // 32-байтовый ключ для AES-256
+
+function encryptUrl(url) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+  let encrypted = cipher.update(url, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
+}
+
+function decryptUrl(encryptedUrl) {
+  const [ivHex, encryptedHex] = encryptedUrl.split(':');
+  const iv = Buffer.from(ivHex, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+  let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
+
+app.get('/api/active-users', async (req, res) => {
+  try {
+    const activeTimeWindow = 10 * 60; // 10 минут в секундах
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+    const activeUsers = await db.collection('locations').aggregate([
+      {
+        $match: {
+          timestamp: { $gte: currentTimestamp - activeTimeWindow }
+        }
+      },
+      {
+        $group: {
+          _id: "$userId",
+          lastActive: { $max: "$timestamp" },
+          lastLocation: { $last: { latitude: "$latitude", longitude: "$longitude" } },
+          username: { $first: "$username" },
+          avatarUrl: { $first: "$avatarUrl" }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          userId: "$_id",
+          lastActive: 1,
+          latitude: "$lastLocation.latitude",
+          longitude: "$lastLocation.longitude",
+          username: 1,
+          avatarUrl: 1
+        }
+      }
+    ]).toArray();
+
+    // Шифруем URL аватаров
+    activeUsers.forEach(user => {
+      if (user.avatarUrl) {
+        user.avatarUrl = `${apiBaseUrl}/secure-avatar/${encryptUrl(user.avatarUrl)}`;
+      }
+    });
+
+    res.json(activeUsers);
+  } catch (error) {
+    console.error('Ошибка при получении активных пользователей:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+// Добавьте этот новый эндпоинт для проксирования запросов к аватарам
+app.get('/secure-avatar/:encryptedUrl', async (req, res) => {
+  try {
+    const encryptedUrl = req.params.encryptedUrl;
+    const originalUrl = decryptUrl(encryptedUrl);
+    
+    const response = await fetch(originalUrl);
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch avatar');
+    }
+
+    // Устанавливаем заголовки ответа
+    res.set('Content-Type', response.headers.get('content-type'));
+    res.set('Content-Length', response.headers.get('content-length'));
+
+    // Передаем данные потоком
+    response.body.pipe(res);
+  } catch (error) {
+    console.error('Error fetching avatar:', error);
+    res.status(500).send('Error fetching avatar');
+  }
+});
+
 // Получение списка зарядных станций
 app.get('/api/charging-stations', async (req, res) => {
   try {
@@ -112,7 +204,7 @@ app.post('/api/charging-stations', upload.single('photo'), async (req, res) => {
     }
 });
 
-// Добавление новой зарядной станции
+// Добавление новой заряднй станции
 app.put('/api/charging-stations/:id', upload.single('photo'), async (req, res) => {
     try {
         const { id } = req.params;
