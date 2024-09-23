@@ -127,7 +127,7 @@ app.get('/api/active-users', async (req, res) => {
 
       let totalDistance = 0;
       let totalTime = 0;
-      const minDistanceThreshold = 5; // минимальное расстояние в метрах для учета движения
+      const minDistanceThreshold = 30; // минимальное расстояние в метрах для учета движения
 
       for (let i = 1; i < recentCoordinates.length; i++) {
         const prev = recentCoordinates[i - 1];
