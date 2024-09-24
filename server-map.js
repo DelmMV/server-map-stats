@@ -36,19 +36,6 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use(cors());
 
-const compressImage = async (buffer) => {
-    try {
-        const compressedImageBuffer = await sharp(buffer)
-            .resize({ width: 1024, height: 1024, fit: 'inside' })
-            .jpeg({ quality: 80 })
-            .toBuffer();
-        return compressedImageBuffer;
-    } catch (error) {
-        console.error('Error compressing image:', error);
-        throw error;
-    }
-};
-
 const storage = multer.memoryStorage();
 const upload = multer({
     storage: storage,
@@ -127,7 +114,7 @@ app.get('/api/active-users', async (req, res) => {
 
       let totalDistance = 0;
       let totalTime = 0;
-      const minDistanceThreshold = 30; // минимальное расстояние в метрах для учета движения
+      const minDistanceThreshold = 20; // минимальное расстояние в метрах для учета движения
 
       for (let i = 1; i < recentCoordinates.length; i++) {
         const prev = recentCoordinates[i - 1];
