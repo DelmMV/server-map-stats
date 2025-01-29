@@ -74,7 +74,7 @@ function decryptUrl(encryptedUrl) {
 app.get('/api/active-users', async (req, res) => {
   try {
     const activeTimeWindow = 10 * 60; // 10 минут в секундах
-    const speedCalculationWindow = 120; // 2 минута в секундах
+    const speedCalculationWindow = 60; // 1 минута в секундах
     const currentTimestamp = Math.floor(Date.now() / 1000);
     const activeUsers = await db.collection('locations').aggregate([
       {
