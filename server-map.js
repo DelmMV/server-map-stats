@@ -1612,7 +1612,7 @@ app.get('/api/total-category-by-distance/:period', async (req, res) => {
 // Получение списка мастерских
 app.get('/api/workshops', async (req, res) => {
 	try {
-		const workshopsDb = client.db('feedback_bot_test')
+		const workshopsDb = client.db('feedback_bot')
 		const workshops = await workshopsDb.collection('workshops').find().toArray()
 		res.json(workshops)
 	} catch (error) {
