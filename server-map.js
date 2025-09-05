@@ -11,7 +11,7 @@ const fetch = require('node-fetch')
 
 const app = express()
 const port = 5001
-const url = 'mongodb://192.168.0.176:27017'
+const url = 'mongodb://localhost:27017'
 const dbName = 'geolocation_db'
 const centerLat = 59.9505
 
