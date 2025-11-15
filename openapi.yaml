@@ -1,0 +1,926 @@
+openapi: 3.0.3
+info:
+  title: Geolocation & Stats API
+  version: 1.0.0
+  description: |
+    Бэкенд для геолокации, зарядных станций, тепловых карт и статистики по передвижениям пользователей.
+
+servers:
+  - url: http://localhost:5001
+    description: Local server
+
+tags:
+  - name: Users
+    description: Активные пользователи и статистика
+  - name: Avatars
+    description: Безопасная выдача аватаров
+  - name: ChargingStations
+    description: Зарядные станции
+  - name: Heatmap
+    description: Тепловые карты
+  - name: Routes
+    description: Маршруты пользователей
+  - name: Stats
+    description: Сводная статистика и топы
+  - name: Categories
+    description: Север/юг категории по дистанциям
+  - name: Workshops
+    description: Мастерские
+
+paths:
+  /api/active-users:
+    get:
+      tags: [Users]
+      summary: Получить активных пользователей
+      description: >
+        Возвращает пользователей, активных за последние 10 минут, с их последней геопозицией и средней скоростью за последние 120 секунд.  
+        URL аватаров шифруются и ведут на `/secure-avatar/{encryptedUrl}`.
+      responses:
+        '200':
+          description: Список активных пользователей
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActiveUser'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /secure-avatar/{encryptedUrl}:
+    get:
+      tags: [Avatars]
+      summary: Проксирование зашифрованного URL аватара
+      description: |
+        Дешифрует URL аватарки, делает запрос к исходному URL и проксирует бинарный ответ.
+      parameters:
+        - in: path
+          name: encryptedUrl
+          required: true
+          schema:
+            type: string
+          description: Зашифрованный URL аватара (формат `iv:encryptedHex`).
+      responses:
+        '200':
+          description: Аватар (изображение)
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '500':
+          description: Ошибка при получении аватара
+
+  /api/charging-stations:
+    get:
+      tags: [ChargingStations]
+      summary: Список зарядных станций
+      responses:
+        '200':
+          description: Список всех зарядных станций
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChargingStation'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [ChargingStations]
+      summary: Создать зарядную станцию
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                latitude:
+                  type: string
+                  example: "59.9505"
+                longitude:
+                  type: string
+                  example: "30.3163"
+                comment:
+                  type: string
+                userId:
+                  type: string
+                  description: ID пользователя (будет преобразован в Number)
+                addedBy:
+                  type: string
+                  description: JSON-строка с информацией о пользователе
+                addedAt:
+                  type: string
+                  format: date-time
+                is24Hours:
+                  type: string
+                  enum: ["true", "false"]
+                markerType:
+                  type: string
+                photo:
+                  type: string
+                  format: binary
+                  description: Файл изображения (опционально, до 10 МБ)
+      responses:
+        '201':
+          description: Станция создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChargingStation'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/charging-stations/{id}:
+    put:
+      tags: [ChargingStations]
+      summary: Обновить зарядную станцию
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ID станции (MongoDB ObjectId)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                latitude:
+                  type: string
+                longitude:
+                  type: string
+                comment:
+                  type: string
+                is24Hours:
+                  type: string
+                  enum: ["true", "false"]
+                markerType:
+                  type: string
+                photo:
+                  type: string
+                  format: binary
+                  description: Новое фото (опционально)
+      responses:
+        '200':
+          description: Успешное обновление станции
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [ChargingStations]
+      summary: Удалить зарядную станцию
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Успешное удаление
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/charging-stations/{id}/like/{userId}:
+    post:
+      tags: [ChargingStations]
+      summary: Поставить/снять лайк у станции
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Статус лайка обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/charging-stations/{id}/dislike/{userId}:
+    post:
+      tags: [ChargingStations]
+      summary: Поставить/снять дизлайк у станции
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Статус дизлайка обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/charging-stations/{id}/like-status/{userId}:
+    get:
+      tags: [ChargingStations]
+      summary: Получить статус лайка/дизлайка станции
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Статус лайка/дизлайка
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LikeStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/monthly-heatmap/{year}/{month}:
+    get:
+      tags: [Heatmap]
+      summary: Месячная тепловая карта
+      parameters:
+        - in: path
+          name: year
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: month
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+      responses:
+        '200':
+          description: Тепловая карта за месяц
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HeatmapPoint'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/yearly-heatmap/{year}:
+    get:
+      tags: [Heatmap]
+      summary: Годовая тепловая карта
+      parameters:
+        - in: path
+          name: year
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Сводная тепловая карта года
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HeatmapPoint'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/heatmap:
+    get:
+      tags: [Heatmap]
+      summary: Тепловая карта за произвольный период
+      parameters:
+        - in: query
+          name: startDate
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: endDate
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Тепловая карта за период
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HeatmapPoint'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/route/{userId}:
+    get:
+      tags: [Routes]
+      summary: Маршрут пользователя
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: startDate
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: endDate
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Маршрут пользователя
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RoutePoint'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/top-users/this_week:
+    get:
+      tags: [Stats]
+      summary: Топ пользователей за текущую неделю
+      responses:
+        '200':
+          description: Список топ-пользователей
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TopUser'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/top-users/last_week:
+    get:
+      tags: [Stats]
+      summary: Топ пользователей за прошлую неделю
+      responses:
+        '200':
+          description: Список топ-пользователей
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TopUser'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/top-users/this_month:
+    get:
+      tags: [Stats]
+      summary: Топ пользователей за текущий месяц
+      responses:
+        '200':
+          description: Список топ-пользователей
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TopUser'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/top-users/last_month:
+    get:
+      tags: [Stats]
+      summary: Топ пользователей за прошлый месяц
+      responses:
+        '200':
+          description: Список топ-пользователей
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TopUser'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/user-stats/week/{userId}:
+    get:
+      tags: [Stats]
+      summary: Недельная статистика пользователя
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Подробная статистика за текущую неделю
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserWeeklyStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/total-distance/{period}:
+    get:
+      tags: [Stats]
+      summary: Общая дистанция всех пользователей за период
+      parameters:
+        - in: path
+          name: period
+          required: true
+          schema:
+            $ref: '#/components/schemas/PeriodEnum'
+      responses:
+        '200':
+          description: Общая дистанция
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TotalDistanceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/top-sessions/{period}:
+    get:
+      tags: [Stats]
+      summary: Топ сессий по дистанции за период
+      parameters:
+        - in: path
+          name: period
+          required: true
+          schema:
+            $ref: '#/components/schemas/PeriodEnum'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Топ сессий
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopSessionsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/top-daily-distances/{period}:
+    get:
+      tags: [Stats]
+      summary: Топ дневных дистанций за период
+      parameters:
+        - in: path
+          name: period
+          required: true
+          schema:
+            $ref: '#/components/schemas/PeriodEnum'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Топ дневных дистанций
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopDailyDistancesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/user-category-by-distance/{userId}:
+    get:
+      tags: [Categories]
+      summary: Категория пользователя (north/south) по дистанции
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Категория и распределение дистанции
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserCategoryByDistance'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/total-category-by-distance/{period}:
+    get:
+      tags: [Categories]
+      summary: Общая статистика north/south по дистанции за период
+      parameters:
+        - in: path
+          name: period
+          required: true
+          schema:
+            $ref: '#/components/schemas/PeriodEnum'
+      responses:
+        '200':
+          description: Общая категория и распределение дистанции
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TotalCategoryByDistance'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/workshops:
+    get:
+      tags: [Workshops]
+      summary: Список мастерских
+      responses:
+        '200':
+          description: Мастерские (БД feedback_bot.workshops)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Workshop'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  schemas:
+    ActiveUser:
+      type: object
+      properties:
+        userId:
+          type: integer
+        lastActive:
+          type: integer
+          description: Unix timestamp (секунды)
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        username:
+          type: string
+        avatarUrl:
+          type: string
+          description: Проксированный и зашифрованный URL аватара
+        averageSpeed:
+          type: number
+          format: double
+          description: Средняя скорость, км/ч
+
+    ChargingStation:
+      type: object
+      properties:
+        _id:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        comment:
+          type: string
+        photo:
+          type: string
+          nullable: true
+          description: URL фото станции
+        userId:
+          type: integer
+        addedBy:
+          type: object
+          additionalProperties: true
+        addedAt:
+          type: string
+          format: date-time
+        is24Hours:
+          type: boolean
+        markerType:
+          type: string
+        likes:
+          type: integer
+        dislikes:
+          type: integer
+        likedBy:
+          type: array
+          items:
+            type: integer
+        dislikedBy:
+          type: array
+          items:
+            type: integer
+
+    HeatmapPoint:
+      type: object
+      properties:
+        latitude:
+          type: number
+        longitude:
+          type: number
+        intensity:
+          type: integer
+
+    RoutePoint:
+      type: object
+      properties:
+        _id:
+          type: string
+        userId:
+          type: integer
+        username:
+          type: string
+        sessionId:
+          oneOf:
+            - type: integer
+            - type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        timestamp:
+          type: integer
+          description: Unix timestamp (секунды)
+
+    TopUser:
+      type: object
+      properties:
+        userId:
+          type: integer
+        username:
+          type: string
+        distance:
+          type: number
+          format: double
+          description: Общая дистанция за период, км
+        averageSpeed:
+          type: number
+          format: double
+          description: Средняя скорость за период, км/ч
+
+    WeeklyDayStats:
+      type: object
+      properties:
+        day:
+          type: string
+          example: Понедельник
+        distance:
+          type: number
+          format: double
+        averageSpeed:
+          type: number
+          format: double
+
+    UserWeeklyStats:
+      type: object
+      properties:
+        totalDistance:
+          type: number
+          format: double
+        averageSpeed:
+          type: number
+          format: double
+        dailyStats:
+          type: array
+          items:
+            $ref: '#/components/schemas/WeeklyDayStats'
+
+    TotalDistanceResponse:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/PeriodEnum'
+        totalDistance:
+          type: number
+          format: double
+          description: Общая дистанция, км
+
+    TopSession:
+      type: object
+      properties:
+        userId:
+          type: integer
+        username:
+          type: string
+        sessionId:
+          oneOf:
+            - type: integer
+            - type: string
+        sessionLength:
+          type: integer
+          description: Количество точек в сессии
+        distance:
+          type: number
+          format: double
+          description: Дистанция, км
+        duration:
+          type: number
+          format: double
+          description: Продолжительность, минуты
+
+    TopSessionsResponse:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/PeriodEnum'
+        topSessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopSession'
+
+    TopDailyDistance:
+      type: object
+      properties:
+        userId:
+          type: integer
+        username:
+          type: string
+        date:
+          type: string
+          format: date
+        distance:
+          type: number
+          format: double
+          description: Пройденная дистанция за день, км
+
+    TopDailyDistancesResponse:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/PeriodEnum'
+        topDailyDistances:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopDailyDistance'
+
+    UserCategoryByDistance:
+      type: object
+      properties:
+        userId:
+          type: integer
+        totalDistance:
+          type: string
+          description: Общая дистанция, км (строкой с двумя знаками после запятой)
+        northDistance:
+          type: string
+        southDistance:
+          type: string
+        category:
+          type: string
+          enum: [north, south]
+        percentageInNorth:
+          type: string
+        percentageInSouth:
+          type: string
+
+    TotalCategoryByDistance:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/PeriodEnum'
+        totalDistance:
+          type: string
+        northDistance:
+          type: string
+        southDistance:
+          type: string
+        category:
+          type: string
+          enum: [north, south]
+        percentageInNorth:
+          type: string
+        percentageInSouth:
+          type: string
+
+    Workshop:
+      type: object
+      description: >
+        Документ из БД feedback_bot.workshops. Структура гибкая, зависит от внешнего сервиса.
+      additionalProperties: true
+
+    LikeStatus:
+      type: object
+      properties:
+        liked:
+          type: boolean
+        disliked:
+          type: boolean
+        likes:
+          type: integer
+        dislikes:
+          type: integer
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    PeriodEnum:
+      type: string
+      enum:
+        - this_week
+        - last_week
+        - this_month
+        - last_month
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+          nullable: true
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
